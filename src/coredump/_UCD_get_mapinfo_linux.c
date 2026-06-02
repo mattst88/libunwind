@@ -43,30 +43,39 @@
  * containing the mapped file names.  They are ordered correspondingly to each
  * entry in the map structure array.
  */
-struct core_nt_file_hdr_s
-{
-  unsigned long count;
-  unsigned long pagesz;
-};
-typedef struct core_nt_file_hdr_s core_nt_file_hdr_t;
-
-struct core_nt_file_entry_s
-{
-  unsigned long start;
-  unsigned long end;
-  unsigned long offset;
-};
-typedef struct core_nt_file_entry_s core_nt_file_entry_t;
-
-
 static const char   deleted[] = "(deleted)";
 static const size_t deleted_len = sizeof (deleted) - 1; // -1 removes the \0 like strlen does.
-static const size_t mapinfo_offset = sizeof (core_nt_file_hdr_t);
 
 static int _path_ends_with(const char* path, size_t path_len, const char* match, size_t match_len)
 {
     if (path_len < match_len) return 0;
     return memcmp(path + (path_len - match_len), match, match_len) == 0;
+}
+
+/* Read a wordsize-byte unsigned integer from p, handling endianness. */
+static uint64_t
+_ntfile_read_word (const uint8_t *p, int wordsize, int big_endian)
+{
+  if (wordsize == 4)
+    {
+      uint32_t v;
+      memcpy (&v, p, 4);
+      if (big_endian)
+        v = (uint32_t)(((v & 0xffu) << 24) | (((v >> 8) & 0xffu) << 16) |
+                       (((v >> 16) & 0xffu) << 8) | ((v >> 24) & 0xffu));
+      return v;
+    }
+  else
+    {
+      uint64_t v;
+      memcpy (&v, p, 8);
+      if (big_endian)
+        v = (((uint64_t)(v & 0xffu)) << 56) | (((uint64_t)((v >> 8) & 0xffu)) << 48) |
+            (((uint64_t)((v >> 16) & 0xffu)) << 40) | (((uint64_t)((v >> 24) & 0xffu)) << 32) |
+            (((uint64_t)((v >> 32) & 0xffu)) << 24) | (((uint64_t)((v >> 40) & 0xffu)) << 16) |
+            (((uint64_t)((v >> 48) & 0xffu)) << 8) | ((uint64_t)((v >> 56) & 0xffu));
+      return v;
+    }
 }
 
 /**
@@ -83,30 +92,49 @@ static int _path_ends_with(const char* path, size_t path_len, const char* match,
  * the program headers in the core file through the UCD_info file table.
  *
  * Any file names that end in the string "(deleted)" are ignored.
+ *
+ * NT_FILE field widths match the core's ELF word size (4 bytes for 32-bit
+ * cores, 8 bytes for 64-bit cores) and use the core's byte order.  Avoid
+ * using host-native struct layouts (e.g. unsigned long) which differ between
+ * 32-bit and 64-bit hosts.
  */
 static int
 _handle_nt_file_note (uint8_t *desc, void *arg)
 {
   struct UCD_info *ui = (struct UCD_info *)arg;
-  core_nt_file_hdr_t *mapinfo = (core_nt_file_hdr_t *)desc;
-  core_nt_file_entry_t *maps = (core_nt_file_entry_t *) (desc + mapinfo_offset);
-  char *strings = (char *) (desc + mapinfo_offset + sizeof (core_nt_file_entry_t) * mapinfo->count);
+  int wordsize   = ui->elf_bits / 8;  /* 4 for 32-bit cores, 8 for 64-bit */
+  int big_endian = ui->big_endian;
 
-  for (unsigned long i = 0; i < mapinfo->count; ++i)
+  /* NT_FILE header: count (wordsize bytes) + pagesz (wordsize bytes).
+   * Use byte-level reads to handle both word size and endianness correctly;
+   * desc may be unaligned (odd offset within PT_NOTE segment). */
+  uint64_t count  = _ntfile_read_word (desc,            wordsize, big_endian);
+  uint64_t pagesz = _ntfile_read_word (desc + wordsize, wordsize, big_endian);
+
+  /* Each entry: start (wordsize) + end (wordsize) + offset (wordsize). */
+  uint8_t *entries_base = desc + 2 * (size_t)wordsize;
+  char    *strings      = (char *)(entries_base + 3 * (size_t)wordsize * count);
+
+  for (uint64_t i = 0; i < count; ++i)
     {
+      uint8_t *entry  = entries_base + i * 3 * (size_t)wordsize;
+      uint64_t start  = _ntfile_read_word (entry,                    wordsize, big_endian);
+      uint64_t end    = _ntfile_read_word (entry + wordsize,         wordsize, big_endian);
+      uint64_t offset = _ntfile_read_word (entry + 2 * wordsize,    wordsize, big_endian);
+
       size_t len = strlen (strings);
 
       for (unsigned p = 0; p < ui->phdrs_count; ++p)
         {
           if (ui->phdrs[p].p_type == PT_LOAD
-              && maps[i].start >= ui->phdrs[p].p_vaddr
-              && maps[i].end <= ui->phdrs[p].p_vaddr + ui->phdrs[p].p_memsz)
+              && start >= ui->phdrs[p].p_vaddr
+              && end <= ui->phdrs[p].p_vaddr + ui->phdrs[p].p_memsz)
             {
-              if (len > 0 && !_path_ends_with(strings, len, deleted, deleted_len))
+              if (len > 0 && !_path_ends_with (strings, len, deleted, deleted_len))
                 {
                   ui->phdrs[p].p_backing_file_index = ucd_file_table_insert (&ui->ucd_file_table, strings);
                   /* NT_FILE offset is in pages; convert to bytes */
-                  ui->phdrs[p].p_mapoff = entry.offset * hdr.pagesz;
+                  ui->phdrs[p].p_mapoff = offset * pagesz;
                   Debug (3, "adding '%s' at index %d (mapoff=0x%lx)\n", strings, ui->phdrs[p].p_backing_file_index, (unsigned long)ui->phdrs[p].p_mapoff);
                 }
               else

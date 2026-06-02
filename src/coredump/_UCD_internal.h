@@ -100,7 +100,8 @@ struct UCD_thread_info
 
 struct UCD_info
   {
-    int                     big_endian;        /* bool */
+    int                     big_endian;        /* bool: core file is big-endian */
+    int                     elf_bits;          /* 32 or 64: core file word size */
     int                     coredump_fd;
     char                   *coredump_filename; /* for error meesages only */
     coredump_phdr_t        *phdrs;             /* array, allocated */

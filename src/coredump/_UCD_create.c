@@ -96,6 +96,8 @@ _UCD_create(const char *filename)
     }
 
   _64bits = (elf_header32.e_ident[EI_CLASS] == ELFCLASS64);
+  ui->elf_bits = _64bits ? 64 : 32;
+  ui->big_endian = (elf_header32.e_ident[EI_DATA] == ELFDATA2MSB);
   if (_64bits && sizeof(elf_header64.e_entry) > sizeof(off_t))
     {
       Debug(0, "Can't process '%s': 64-bit file "
