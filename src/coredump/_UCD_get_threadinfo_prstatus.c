@@ -100,6 +100,10 @@ _save_thread_notes(uint32_t  n_namesz UNUSED,
 #else
   if (n_type == NT_PRSTATUS)
     {
+      Debug(0, "NT_PRSTATUS n_descsz=%u sizeof=%zu pr_reg_offset=%zu desc[0..3]=%02x%02x%02x%02x\n",
+            n_descsz, sizeof(UCD_proc_status_t),
+            offsetof(UCD_proc_status_t, pr_reg),
+            desc[0], desc[1], desc[2], n_descsz >= 4 ? desc[3] : 0);
       memcpy(&ui->threads[ui->n_threads].prstatus, desc, sizeof(UCD_proc_status_t));
       ++ui->n_threads;
     }
