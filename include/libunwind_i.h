@@ -438,4 +438,130 @@ static inline void invalidate_edi (struct elf_dyn_info *edi)
 
 #define UNW_ALIGN(x,a) (((size_t)(x) + (size_t)(a) - 1) & ~((size_t)(a) - 1))
 
+#ifndef UNW_REMOTE_ONLY
+#if defined(HAVE__DL_FIND_OBJECT) && defined(HAVE_DL_ITERATE_PHDR)
+#include <dlfcn.h>
+#include <sys/auxv.h>
+
+/* Return 1 if phdr[0..phnum) contains a PT_PHDR entry that does not
+   describe phdr itself when loaded at bias, 0 otherwise.  */
+static inline int
+unwi_phdr_mismatch (const ElfW(Phdr) *phdr, size_t phnum, uintptr_t bias)
+{
+  size_t n;
+
+  for (n = 0; n < phnum; n++)
+    if (phdr[n].p_type == PT_PHDR && bias + phdr[n].p_vaddr != (uintptr_t) phdr)
+      return 1;
+  return 0;
+}
+
+/* Describe the loaded object containing ip in *info, the way
+   dl_iterate_phdr would, using _dl_find_object.  Unlike dl_iterate_phdr,
+   _dl_find_object takes no locks, so it is async-signal-safe, and it does
+   not scan every loaded object.
+
+   _dl_find_object does not report the program headers.  For the main
+   program take them from the auxiliary vector, like the dynamic linker
+   does; in static executables the reported mapping need not start at the
+   ELF header.  For other objects find them through the ELF header at the
+   start of the object's mapping, and check that it describes this object
+   at this load address.
+
+   Returns 1 on success, 0 if no loaded object contains ip, or -1 if the
+   program headers could not be located.  */
+static inline int
+unwi_find_object_phdr_info (unw_word_t ip, struct dl_phdr_info *info)
+{
+  struct dl_find_object dlfo;
+  const ElfW(Ehdr) *ehdr;
+  const ElfW(Phdr) *phdr;
+  uintptr_t bias, start, size;
+  size_t phnum, n;
+
+  if (_dl_find_object ((void *) (uintptr_t) ip, &dlfo) != 0)
+    return 0;
+
+  bias = dlfo.dlfo_link_map->l_addr;
+
+  phdr = (const ElfW(Phdr) *) getauxval (AT_PHDR);
+  phnum = getauxval (AT_PHNUM);
+  if (phdr != NULL && getauxval (AT_PHENT) == sizeof (ElfW(Phdr))
+      && !unwi_phdr_mismatch (phdr, phnum, bias))
+    for (n = 0; n < phnum; n++)
+      if (phdr[n].p_type == PT_LOAD
+          && ip >= bias + phdr[n].p_vaddr
+          && ip < bias + phdr[n].p_vaddr + phdr[n].p_memsz)
+        goto found;
+
+  start = (uintptr_t) dlfo.dlfo_map_start;
+  size = (uintptr_t) dlfo.dlfo_map_end - start;
+  ehdr = (const ElfW(Ehdr) *) start;
+
+  if (size < sizeof (*ehdr)
+      || memcmp (ehdr->e_ident, ELFMAG, SELFMAG) != 0
+      || ehdr->e_phentsize != sizeof (ElfW(Phdr))
+      || ehdr->e_phoff > size
+      || ehdr->e_phnum > (size - ehdr->e_phoff) / sizeof (ElfW(Phdr)))
+    return -1;
+
+  phdr = (const ElfW(Phdr) *) (start + ehdr->e_phoff);
+  phnum = ehdr->e_phnum;
+  if (unwi_phdr_mismatch (phdr, phnum, bias))
+    return -1;
+
+  /* The segment mapping file offset 0 holds the ELF header.  */
+  for (n = 0; n < phnum; n++)
+    if (phdr[n].p_type == PT_LOAD && phdr[n].p_offset == 0)
+      break;
+  if (n == phnum || bias + phdr[n].p_vaddr != start)
+    return -1;
+
+found:
+  memset (info, 0, sizeof (*info));
+  info->dlpi_addr = bias;
+  info->dlpi_name = dlfo.dlfo_link_map->l_name;
+  info->dlpi_phdr = phdr;
+  info->dlpi_phnum = phnum;
+  return 1;
+}
+#endif /* HAVE__DL_FIND_OBJECT && HAVE_DL_ITERATE_PHDR */
+
+/* Call callback on the loaded object containing ip, the way
+   as->iterate_phdr_function would.  Callers' callbacks ignore objects
+   that do not contain ip, so this is equivalent to iterating over all of
+   them, but it avoids dl_iterate_phdr when _dl_find_object can be used.
+   An application-supplied iterate_phdr function is always honored, since
+   it may know about objects the dynamic linker does not.  */
+static inline int
+unwi_iterate_phdr_for_ip (unw_addr_space_t as, unw_word_t ip,
+                          unw_iterate_phdr_callback_t callback, void *data)
+{
+  intrmask_t saved_mask;
+  int ret;
+
+  SIGPROCMASK (SIG_SETMASK, &unwi_full_mask, &saved_mask);
+#if defined(HAVE__DL_FIND_OBJECT) && defined(HAVE_DL_ITERATE_PHDR)
+  if (as->iterate_phdr_function == dl_iterate_phdr)
+    {
+      struct dl_phdr_info info;
+
+      ret = unwi_find_object_phdr_info (ip, &info);
+      if (ret >= 0)
+        {
+          if (ret > 0)
+            ret = callback (&info, sizeof (info), data);
+          SIGPROCMASK (SIG_SETMASK, &saved_mask, NULL);
+          return ret;
+        }
+      Debug (3, "cannot locate program headers for IP=0x%lx, "
+             "falling back to dl_iterate_phdr\n", (long) ip);
+    }
+#endif
+  ret = as->iterate_phdr_function (callback, data);
+  SIGPROCMASK (SIG_SETMASK, &saved_mask, NULL);
+  return ret;
+}
+#endif /* !UNW_REMOTE_ONLY */
+
 #endif /* libunwind_i_h */
