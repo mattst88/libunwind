@@ -404,10 +404,10 @@ debug_frame_index_sort (struct unw_debug_frame_list *fdesc)
     }
 }
 
-int
-dwarf_find_debug_frame (int found, unw_dyn_info_t *di_debug, unw_word_t ip,
-                        unw_word_t segbase, const char* obj_name,
-                        unw_word_t start, unw_word_t end)
+static int
+find_debug_frame_locked (int found, unw_dyn_info_t *di_debug, unw_word_t ip,
+                         unw_word_t segbase, const char* obj_name,
+                         unw_word_t start, unw_word_t end)
 {
   unw_dyn_info_t *di = di_debug;
   struct unw_debug_frame_list *fdesc;
@@ -484,6 +484,25 @@ dwarf_find_debug_frame (int found, unw_dyn_info_t *di_debug, unw_word_t ip,
          (long) di->u.ti.segbase, (long) di->u.ti.table_len,
          (long) di->gp, (long) di->u.ti.table_data);
 
+  return found;
+}
+
+/* Serializes loading .debug_frame sections into the debug_frames list
+   and building their indexes.  Callers may run concurrently: nothing
+   guarantees they run under the lock that dl_iterate_phdr holds.  */
+static define_lock (debug_frame_lock);
+
+int
+dwarf_find_debug_frame (int found, unw_dyn_info_t *di_debug, unw_word_t ip,
+                        unw_word_t segbase, const char* obj_name,
+                        unw_word_t start, unw_word_t end)
+{
+  intrmask_t saved_mask;
+
+  lock_acquire (&debug_frame_lock, saved_mask);
+  found = find_debug_frame_locked (found, di_debug, ip, segbase, obj_name,
+                                   start, end);
+  lock_release (&debug_frame_lock, saved_mask);
   return found;
 }
 
