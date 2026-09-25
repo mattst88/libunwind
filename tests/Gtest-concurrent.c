@@ -121,6 +121,7 @@ doit (void)
 int
 main (int argc, char **argv UNUSED)
 {
+  raise (SIGSEGV); /* TEMPORARY: test CI core upload */
   if (argc > 1)
     verbose = 1;
 
