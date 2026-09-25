@@ -434,6 +434,60 @@ jobs:
         env:
           UNW_DEBUG_LEVEL: 4
 
+      # Symbolizing a core needs the exact target libraries the tests ran
+      # with, which only this container has.
+      - name: Collect Runtime Libraries
+        if: failure()
+        run: |
+          host='${{ matrix.config.host }}'
+          gcc_prefix='${{ matrix.config.meson_gcc_prefix || matrix.config.host }}'
+          cc="${gcc_prefix}-gcc-${{ matrix.config.gccver }} ${{ matrix.config.gcc_flags }}"
+          mkdir -p build-meson/runtime-libs
+
+          # Search where the tests found their libraries: scripts/meson-qemu-exe-wrapper
+          # sets LD_LIBRARY_PATH to libgcc_s's directory and passes the
+          # sysroot to qemu, and otherwise the multiarch directories apply.
+          ldpath=$(dirname "$($cc --print-file-name=libgcc_s.so.1)")
+          sysroot=$($cc --print-sysroot)
+          if [ -z "$sysroot" ] || [ "$sysroot" = / ]; then
+            sysroot=/usr/$($cc -dumpmachine)
+          fi
+
+          # Every library the tests and libunwind need, and the dynamic
+          # linker by its full path.  readelf fails on the non-ELF files in
+          # tests/, which must not end the loop under sh -e.
+          libs=$(for f in build-meson/tests/* build-meson/src/*.so*; do
+                   [ -f "$f" ] || continue
+                   "${gcc_prefix}-readelf" -dlW "$f" 2>/dev/null || true
+                 done | sed -n -e 's/.*(NEEDED).*\[\(.*\)\]$/\1/p' \
+                               -e 's/.*program interpreter: \(.*\)\]$/\1/p' |
+                 sort -u)
+
+          for lib in $libs; do
+            name=${lib##*/}
+            case $name in libunwind*) continue ;; esac
+            # The dynamic linker is both NEEDED and the interpreter.
+            [ -e "build-meson/runtime-libs/${name}" ] && continue
+            found=
+            case $lib in
+              /*) set -- "${sysroot}${lib}" "$lib" ;;
+              *)  set -- "${ldpath}/${name}" "${sysroot}/lib/${name}" \
+                         "/lib/${host}/${name}" "/usr/lib/${host}/${name}" ;;
+            esac
+            for f in "$@"; do
+              if [ -f "$f" ]; then
+                found=$f
+                break
+              fi
+            done
+            if [ -n "$found" ]; then
+              cp -L "$found" build-meson/runtime-libs/
+            else
+              echo "warning: $lib not found"
+            fi
+          done
+          ls -l build-meson/runtime-libs
+
       - name: Upload Test Logs
         if: failure()
         uses: actions/upload-artifact@v7
@@ -450,4 +504,5 @@ jobs:
             !build-meson/src/*.p
             build-meson/tests/*
             !build-meson/tests/*.p
+            build-meson/runtime-libs/
           if-no-files-found: warn
