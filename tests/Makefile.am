@@ -33,7 +33,9 @@ AM_CPPFLAGS = $(UNW_DEBUG_CPPFLAGS) \
               $(UNW_REMOTE_CPPFLAGS) \
               $(UNW_TARGET_CPPFLAGS) \
               $(UNW_CET_CFLAGS) \
-              -I$(top_srcdir)/include -I$(top_srcdir)/include/tdep-$(arch) -I$(top_srcdir)/src
+              -I$(top_srcdir)/include -I$(top_srcdir)/include/api \
+              -I$(top_builddir)/include/api \
+              -I$(top_srcdir)/include/tdep-$(arch) -I$(top_srcdir)/src
 AM_CFLAGS = $(UNW_EXTRA_CFLAGS) -g -fno-optimize-sibling-calls
 AM_CXXFLAGS = $(UNW_EXTRA_CFLAGS) -g -fno-optimize-sibling-calls
 
@@ -42,6 +44,7 @@ AM_LDFLAGS = $(LD_FLAGS_UNW_CET)
 LOG_DRIVER = $(SHELL) $(UNW_TESTDRIVER)
 
 EXTRA_DIST =	run-ia64-test-dyn1 run-ptrace-mapper run-ptrace-misc	\
+		run-debuglink \
 		run-coredump-unwind \
 		run-coredump-unwind-mdi check-namespace.sh.in \
 		test-runner.in \
@@ -111,12 +114,14 @@ endif
 			test-iterate-phdr-cache-null			 \
 			test-mem test-reg-state Ltest-varargs		 \
 			Ltest-nomalloc Ltest-nocalloc Lrs-race \
-			test-getcontext-gp
+			Ltest-sig-first-insn test-getcontext-gp
  noinst_PROGRAMS_cdep += forker Gperf-simple Lperf-simple \
 			Gperf-trace Lperf-trace
 
-# only enable Ltest-mem-validate on archs without conservative checks
-if !CONSERVATIVE_CHECKS
+# x86_64 and s390x only validate memory addresses while unwinding when
+# conservative checks are enabled, so the test can only pass there in that
+# configuration.  Every other arch validates unconditionally.
+if CONSERVATIVE_CHECKS
  check_PROGRAMS_cdep += Ltest-mem-validate
 else #CONSERVATIVE_CHECKS
 if !ARCH_X86_64
@@ -141,11 +146,7 @@ endif
 if BUILD_PTRACE
  check_SCRIPTS_cdep += run-ptrace-mapper run-ptrace-misc
  check_PROGRAMS_cdep += test-ptrace
- noinst_PROGRAMS_cdep += mapper test-ptrace-misc
-if ARCH_X86
- # https://github.com/libunwind/libunwind/issues/392
- XFAIL_TESTS += test-ptrace
-endif
+ noinst_PROGRAMS_cdep += mapper ptrace-tracee test-ptrace-misc
 endif
 
 if BUILD_SETJMP
@@ -160,9 +161,15 @@ if USE_ELF64
  check_PROGRAMS_cdep += test-elf64-gnu-hash
 endif
 
-if SUPPORT_CXX_EXCEPTIONS
- check_PROGRAMS_cdep += Ltest-cxx-exceptions
-endif
+# run-debuglink needs objcopy and strip to build a separate debug file; it
+# skips itself if they are not available.
+check_SCRIPTS_cdep += run-debuglink
+noinst_PROGRAMS_cdep += test-debuglink
+
+# Doesn't need SUPPORT_CXX_EXCEPTIONS (libunwind's own _Unwind_* API): this
+# just throws/catches via the toolchain's libgcc and checks that libunwind's
+# DWARF unwinder can walk the frames.
+check_PROGRAMS_cdep += Ltest-cxx-exceptions
 
 if ARCH_IA64
  check_PROGRAMS_cdep += Gtest-dyn1 Ltest-dyn1
@@ -197,8 +204,23 @@ check_SCRIPTS =	$(check_SCRIPTS_common) $(check_SCRIPTS_cdep) \
 		$(check_SCRIPTS_arch)
 
 TESTS = $(check_PROGRAMS)
-if !CROSS_BUILD
- TESTS += $(check_SCRIPTS)
+# check-namespace.sh reads the built libraries with nm instead of running
+# them, so it is as useful in a cross build as in a native one.
+TESTS += $(check_SCRIPTS_common)
+if RUN_HOST_BINARIES
+ TESTS += $(check_SCRIPTS_cdep) $(check_SCRIPTS_arch)
+else
+# The remaining test scripts run the test programs directly, so they are of
+# no use when those programs cannot be run here.  The coredump tests are the
+# exception: they invoke QEMU themselves.
+if BUILD_COREDUMP
+if OS_LINUX
+ TESTS += run-coredump-unwind
+if HAVE_LZMA
+  TESTS += run-coredump-unwind-mdi
+endif
+endif
+endif
 endif
 
 # Use if arch defines but does not support PTRACE_SINGLESTEP
@@ -222,11 +244,8 @@ if ARCH_LOONGARCH64
 XFAIL_TESTS += $(XFAIL_TESTS_PTRACE_SINGLESTEP)
 endif
 
-# This is meant for multilib binaries, -m32.
-# ptrace gives EBADREG when testing,
-# but generally everything else works.
-if XFAIL_PTRACE_TEST
- XFAIL_TESTS += run-ptrace-mapper 
+if ARCH_SPARC64
+XFAIL_TESTS += $(XFAIL_TESTS_PTRACE_SINGLESTEP)
 endif
 
 noinst_PROGRAMS = $(noinst_PROGRAMS_common) $(noinst_PROGRAMS_cdep) \
@@ -313,6 +332,7 @@ Ltest_mem_validate_SOURCES = Ltest-mem-validate.c
 Gtest_get_proc_name_SOURCES = Gtest-get_proc_name.c
 test_elf32_gnu_hash_SOURCES = test-elf32-gnu-hash.c
 test_elf64_gnu_hash_SOURCES = test-elf64-gnu-hash.c
+test_debuglink_SOURCES = test-debuglink.c
 
 LIBUNWIND = $(top_builddir)/src/libunwind-$(arch).la
 LIBUNWIND_arch = $(top_builddir)/src/libunwind-arch-$(arch).la
@@ -334,6 +354,7 @@ LIBUNWIND_setjmp = $(top_builddir)/src/libunwind-setjmp.la	\
 
 test_async_sig_LDADD = $(LIBUNWIND_local) $(PTHREADS_LIB)
 test_flush_cache_LDADD = $(LIBUNWIND_local)
+test_debuglink_LDADD = $(LIBUNWIND_local)
 test_iterate_phdr_reentry_LDADD = $(LIBUNWIND_local) $(PTHREADS_LIB)
 test_iterate_phdr_cache_null_LDADD = $(LIBUNWIND_local) $(PTHREADS_LIB)
 test_init_remote_LDADD = $(LIBUNWIND) $(LIBUNWIND_local)
@@ -347,6 +368,8 @@ test_eh_frame_hdr_sdata8_SOURCES = test-eh-frame-hdr-sdata8.c
 test_eh_frame_hdr_sdata8_LDADD =
 Lrs_race_LDADD = $(LIBUNWIND_local) $(PTHREADS_LIB)
 Ltest_varargs_LDADD = $(LIBUNWIND_local)
+Ltest_sig_first_insn_LDADD = $(LIBUNWIND_local)
+Ltest_sig_first_insn_CFLAGS = $(AM_CFLAGS) -fasynchronous-unwind-tables
 test_getcontext_gp_LDADD = $(LIBUNWIND) $(LIBUNWIND_local)
 test_getcontext_gp_LDFLAGS = $(AM_LDFLAGS) -Wl,-z,lazy
 Ltest_init_local_signal_LDADD = $(LIBUNWIND) $(LIBUNWIND_local)
@@ -388,6 +411,14 @@ ia64_test_setjmp_LDADD = $(LIBUNWIND_setjmp)
 
 if BUILD_COREDUMP
 test_coredump_unwind_LDADD = $(LIBUNWIND_coredump) $(LIBUNWIND)
+# ARM defaults to -fno-asynchronous-unwind-tables, so GCC only emits .ARM.exidx
+# entries for C++ exception-propagating functions; pure C functions get CANTUNWIND.
+# Other platforms (x86, x86_64, aarch64, ...) default to -fasynchronous-unwind-tables
+# and always emit .eh_frame for all functions.  The MDI test strips the binary,
+# removing .debug_frame (non-SHF_ALLOC), leaving only .ARM.exidx for unwinding.
+# -funwind-tables forces proper .ARM.exidx entries for all functions so the
+# stripped binary can be unwound.
+crasher_CFLAGS = $(AM_CFLAGS) -funwind-tables
 endif
 
 Gia64_test_nat_LDADD = $(LIBUNWIND) $(LIBUNWIND_local)
@@ -419,3 +450,20 @@ Laarch64_test_frame_size_CFLAGS = $(AM_CFLAGS) -DUNW_LOCAL_ONLY
 Laarch64_test_frame_size_LDADD = $(LIBUNWIND_internal)
 Gaarch64_test_frame_size_LDADD = $(LIBUNWIND_arch)
 aarch64_test_lr_fallback_LDADD = $(LIBUNWIND_local) $(PTHREADS_LIB)
+
+# Copy scripts from source directory to build directory (for cross builds)
+# Use .PHONY to prevent VPATH from resolving targets to source directory
+.PHONY: run-coredump-unwind run-coredump-unwind-mdi
+
+run-coredump-unwind:
+	test $(abs_srcdir)/run-coredump-unwind -ef $@ || cp $(abs_srcdir)/run-coredump-unwind $@
+
+run-coredump-unwind-mdi:
+	test $(abs_srcdir)/run-coredump-unwind-mdi -ef $@ || cp $(abs_srcdir)/run-coredump-unwind-mdi $@
+
+# Also copy scripts with .sh extension (for other scripts)
+# Using explicit absolute path and .PHONY to avoid VPATH issues
+.PHONY: %.sh
+
+%.sh:
+	cp $(abs_srcdir)/$@ $@

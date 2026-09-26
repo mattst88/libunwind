@@ -71,8 +71,13 @@ riscv_handle_signal_frame (unw_cursor_t *cursor)
     }
 
   /* Set SP/CFA and PC/IP.  */
-  dwarf_get (&c->dwarf, c->dwarf.loc[UNW_TDEP_SP], &c->dwarf.cfa);
-  dwarf_get (&c->dwarf, c->dwarf.loc[UNW_TDEP_IP], &c->dwarf.ip);
+  if ((ret = dwarf_get (&c->dwarf, c->dwarf.loc[UNW_TDEP_SP], &c->dwarf.cfa)) < 0)
+    return ret;
+  if ((ret = dwarf_get (&c->dwarf, c->dwarf.loc[UNW_TDEP_IP], &c->dwarf.ip)) < 0)
+    return ret;
+
+  c->dwarf.pi_valid = 0;
+  c->dwarf.use_prev_instr = 0;
 
   return 1;
 }
@@ -92,12 +97,17 @@ unw_step (unw_cursor_t *cursor)
 
   /* Special handling the signal frame. */
   if (unw_is_signal_frame (cursor) > 0)
-    return riscv_handle_signal_frame (cursor);
+    {
+      ret = riscv_handle_signal_frame (cursor);
+      c->validate = validate;
+      return ret;
+    }
 
   /* Restore default memory validation state */
   c->validate = validate;
 
   /* Try DWARF-based unwinding... */
+  c->sigcontext_format = RISCV_SCF_NONE;
   ret = dwarf_step (&c->dwarf);
 
   if (unlikely (ret == -UNW_ESTOPUNWIND))

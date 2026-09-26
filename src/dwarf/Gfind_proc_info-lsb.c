@@ -27,7 +27,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
    (http://www.linuxbase.org/spec/).  */
 
 #include <stddef.h>
-#include <stdio.h>
 #include <limits.h>
 
 #include "dwarf_i.h"
@@ -558,7 +557,7 @@ dwarf_callback (struct dl_phdr_info *info, size_t size, void *ptr)
   unw_accessors_t *a;
   long n;
   int found = 0;
-  struct dwarf_eh_frame_hdr synth_eh_frame_hdr;
+  Elf_W (Addr) eh_frame = 0;
 #ifdef CONFIG_DEBUG_FRAME
   unw_word_t start, end;
 #endif /* CONFIG_DEBUG_FRAME*/
@@ -612,24 +611,14 @@ dwarf_callback (struct dl_phdr_info *info, size_t size, void *ptr)
     }
   else
     {
-      Elf_W (Addr) eh_frame;
       Debug (1, "no .eh_frame_hdr section found\n");
       eh_frame = dwarf_find_eh_frame_section (info);
       if (eh_frame)
-        {
-          Debug (1, "using synthetic .eh_frame_hdr section for %s\n",
-                 info->dlpi_name);
-	  synth_eh_frame_hdr.version = DW_EH_VERSION;
-	  synth_eh_frame_hdr.eh_frame_ptr_enc = DW_EH_PE_absptr |
-	    ((sizeof(Elf_W (Addr)) == 4) ? DW_EH_PE_udata4 : DW_EH_PE_udata8);
-          synth_eh_frame_hdr.fde_count_enc = DW_EH_PE_omit;
-          synth_eh_frame_hdr.table_enc = DW_EH_PE_omit;
-	  synth_eh_frame_hdr.eh_frame = eh_frame;
-          hdr = &synth_eh_frame_hdr;
-        }
+        Debug (1, "using the .eh_frame section of %s directly\n",
+               info->dlpi_name);
     }
 
-  if (hdr)
+  if (hdr || eh_frame)
     {
       if (p_dynamic)
         {
@@ -653,6 +642,28 @@ dwarf_callback (struct dl_phdr_info *info, size_t size, void *ptr)
         di->gp = 0;
       pi->gp = di->gp;
 
+      if (hdr == NULL)
+        {
+          /* There is no .eh_frame_hdr section, hence no binary search
+             table: search the .eh_frame section linearly.  */
+          eh_frame_start = eh_frame;
+          eh_frame_end = max_load_addr; /* XXX can we do better? */
+          fde_count = ~0UL;
+
+          Debug (1, "eh_frame_start = %lx eh_frame_end = %lx\n",
+                 eh_frame_start, eh_frame_end);
+
+          found = linear_search (unw_local_addr_space, ip,
+                                 eh_frame_start, eh_frame_end, fde_count,
+                                 pi, need_unwind_info, NULL);
+          if (found != 1)
+            found = 0;
+          else
+            cb_data->single_fde = 1;
+
+          goto out;
+        }
+
       if (hdr->version != DW_EH_VERSION)
         {
           Debug (1, "table `%s' has unexpected version %d\n",
@@ -663,13 +674,11 @@ dwarf_callback (struct dl_phdr_info *info, size_t size, void *ptr)
       a = unw_get_accessors_int (unw_local_addr_space);
       addr = (unw_word_t) (uintptr_t) (&hdr->eh_frame);
 
-      /* (Optionally) read eh_frame_ptr: */
       if ((ret = dwarf_read_encoded_pointer (unw_local_addr_space, a,
                                              &addr, hdr->eh_frame_ptr_enc, pi,
                                              &eh_frame_start, NULL)) < 0)
         return ret;
 
-      /* (Optionally) read fde_count: */
       if ((ret = dwarf_read_encoded_pointer (unw_local_addr_space, a,
                                              &addr, hdr->fde_count_enc, pi,
                                              &fde_count, NULL)) < 0)
@@ -737,6 +746,7 @@ dwarf_callback (struct dl_phdr_info *info, size_t size, void *ptr)
         }
     }
 
+out:
 #ifdef CONFIG_DEBUG_FRAME
   /* Find the start/end of the described region by parsing the phdr_info
      structure.  */
@@ -795,8 +805,10 @@ dwarf_find_proc_info (unw_addr_space_t as, unw_word_t ip,
 
       /* search the table: */
       if (cb_data.di.format != -1)
+        {
 	ret = dwarf_search_unwind_table_int (as, ip, &cb_data.di,
 					     pi, need_unwind_info, arg);
+        }
       else
 	ret = -UNW_ENOINFO;
 
@@ -976,10 +988,17 @@ dwarf_search_unwind_table (unw_addr_space_t as, unw_word_t ip,
     {
 #ifndef UNW_LOCAL_ONLY
       int64_t found_start = 0, found_fde = 0;
-      int64_t last_ip_offset64 = di->end_ip - ip_base;
+      /* Cast through unw_sword_t to preserve the sign of the offset on
+       * 32-bit targets: ip - ip_base is computed in unsigned unw_word_t
+       * arithmetic and would wrap for ip < ip_base (which happens when
+       * the IP is below segbase).  The explicit signed-narrowing cast
+       * sign-extends the 32-bit result to int64_t correctly.  On 64-bit
+       * targets unw_sword_t is int64_t so the cast is a no-op.  */
+      int64_t rel_ip = (int64_t)(unw_sword_t)(ip - ip_base);
+      int64_t last_ip_offset64 = (int64_t)(unw_sword_t)(di->end_ip - ip_base);
       segbase = di->u.rti.segbase;
       if ((ret = remote_lookup (as, (uintptr_t) table_data, table_len,
-                                ip - ip_base, &found_start, &found_fde,
+                                rel_ip, &found_start, &found_fde,
                                 &last_ip_offset64, is_table64, arg)) < 0)
         return ret;
       if (ret)

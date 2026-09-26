@@ -89,10 +89,13 @@ sh_handle_signal_frame (unw_cursor_t *cursor)
   c->dwarf.loc[UNW_SH_PC]  = DWARF_LOC (sc_addr + LINUX_SC_PC_OFF, 0);
 
   /* Set SP/CFA and PC/IP.  */
-  dwarf_get (&c->dwarf, c->dwarf.loc[UNW_SH_R15], &c->dwarf.cfa);
-  dwarf_get (&c->dwarf, c->dwarf.loc[UNW_SH_PC], &c->dwarf.ip);
+  if ((ret = dwarf_get (&c->dwarf, c->dwarf.loc[UNW_SH_R15], &c->dwarf.cfa)) < 0)
+    return ret;
+  if ((ret = dwarf_get (&c->dwarf, c->dwarf.loc[UNW_SH_PC], &c->dwarf.ip)) < 0)
+    return ret;
 
   c->dwarf.pi_valid = 0;
+  c->dwarf.use_prev_instr = 0;
 
   return 1;
 }
@@ -108,6 +111,7 @@ unw_step (unw_cursor_t *cursor)
   if (unw_is_signal_frame (cursor) > 0)
     return sh_handle_signal_frame (cursor);
 
+  c->sigcontext_format = SH_SCF_NONE;
   ret = dwarf_step (&c->dwarf);
 
   if (unlikely (ret == -UNW_ESTOPUNWIND))

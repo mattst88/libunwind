@@ -61,6 +61,8 @@ struct MAY_ALIAS cursor
   {
     struct dwarf_cursor dwarf;          /* must be first */
 
+    ucontext_t *uc;
+
     /* Format of sigcontext structure and address at which it is
        stored: */
     enum
@@ -82,10 +84,10 @@ struct MAY_ALIAS cursor
 # define DWARF_LOC(r, t)        ((dwarf_loc_t) { .val = (r) })
 # define DWARF_IS_REG_LOC(l)    0
 # define DWARF_REG_LOC(c,r)     (DWARF_LOC((unw_word_t)                      \
-                                 tdep_uc_addr((c)->as_arg, (r)), 0))
+                                 tdep_uc_addr(((struct cursor *)(c))->uc, (r)), 0))
 # define DWARF_MEM_LOC(c,m)     DWARF_LOC ((m), 0)
 # define DWARF_FPREG_LOC(c,r)   (DWARF_LOC((unw_word_t)                      \
-                                 tdep_uc_addr((c)->as_arg, (r)), 0))
+                                 tdep_uc_addr(((struct cursor *)(c))->uc, (r)), 0))
 
 static inline int
 dwarf_getfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t *val)
@@ -110,7 +112,11 @@ dwarf_get (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t *val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
-  *val = *(unw_word_t *) DWARF_GET_LOC (loc);
+  unw_word_t addr = DWARF_GET_LOC (loc);
+  if (unlikely (((struct cursor *) c)->validate)
+      && unlikely (!unw_address_is_valid (addr, sizeof (unw_word_t))))
+    return -1;
+  *val = *(unw_word_t *) addr;
   return 0;
 }
 
@@ -259,7 +265,8 @@ dwarf_put (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t val)
 
 #define tdep_get_as(c)                  ((c)->dwarf.as)
 #define tdep_get_as_arg(c)              ((c)->dwarf.as_arg)
-#define tdep_get_ip(c)                  ((c)->dwarf.ip)
+/* HPPA IAOQ stores privilege level in the low 2 bits; strip them. */
+#define tdep_get_ip(c)                  ((c)->dwarf.ip & ~(unw_word_t)3)
 #define tdep_big_endian(as)             1
 
 extern atomic_bool tdep_init_done;

@@ -113,6 +113,7 @@ unw_step (unw_cursor_t * cursor)
 
   /* Try DWARF-based unwinding... */
 
+  c->sigcontext_format = PPC_SCF_NONE;
   c->dwarf.as->validate = 1;
   ret = dwarf_step (&c->dwarf);
   c->dwarf.as->validate = validate;
@@ -222,6 +223,9 @@ signal_frame:
         c->dwarf.loc[UNW_PPC32_F0 + i] =
           DWARF_FPREG_LOC (&c->dwarf, uc_regs + FREGS_R0 + (i * 8));
 
+      c->dwarf.pi_valid = 0;
+      c->dwarf.use_prev_instr = 0;
+
       ret = 1;
     }
   return ret;
@@ -292,6 +296,9 @@ signal_frame_nonrt:
       for (i = 0; i < 32; i++)
         c->dwarf.loc[UNW_PPC32_F0 + i] =
           DWARF_FPREG_LOC (&c->dwarf, uc_regs + FREGS_R0 + (i * 8));
+
+      c->dwarf.pi_valid = 0;
+      c->dwarf.use_prev_instr = 0;
 
       ret = 1;
     }

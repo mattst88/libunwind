@@ -92,7 +92,9 @@ loongarch64_handle_signal_frame (unw_cursor_t *cursor)
   c->dwarf.loc[UNW_LOONGARCH64_PC] = DWARF_LOC (sc_addr + LINUX_SC_PC_OFF, 0);
 
   /* Set SP/CFA and PC/IP. */
-  dwarf_get (&c->dwarf, c->dwarf.loc[UNW_LOONGARCH64_R3], &c->dwarf.cfa);
+  if ((ret = dwarf_get (&c->dwarf, c->dwarf.loc[UNW_LOONGARCH64_R3],
+                        &c->dwarf.cfa)) < 0)
+    return ret;
 
   if ((ret = dwarf_get(&c->dwarf, DWARF_LOC(sc_addr + LINUX_SC_PC_OFF, 0),
                        &c->dwarf.ip)) < 0)
@@ -131,6 +133,7 @@ unw_step (unw_cursor_t *cursor)
     return loongarch64_handle_signal_frame (cursor);
 
   /* Not a signal frame, try DWARF-based unwinding. */
+  c->sigcontext_format = LOONGARCH64_SCF_NONE;
   ret = dwarf_step (&c->dwarf);
 
   /* Restore default memory validation state */

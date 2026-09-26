@@ -264,6 +264,7 @@ unw_step (unw_cursor_t * cursor)
 
   /* Try DWARF-based unwinding... */
 
+  c->sigcontext_format = PPC_SCF_NONE;
   c->dwarf.as->validate = 1;
   ret = dwarf_step (&c->dwarf);
   c->dwarf.as->validate = validate;
@@ -686,6 +687,9 @@ signal_frame:
               c->dwarf.loc[UNW_PPC64_VRSAVE] = DWARF_NULL_LOC;
               c->dwarf.loc[UNW_PPC64_VSCR] = DWARF_NULL_LOC;
             }
+
+      c->dwarf.pi_valid = 0;
+      c->dwarf.use_prev_instr = 0;
       ret = 1;
     }
 

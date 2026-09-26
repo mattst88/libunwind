@@ -24,6 +24,9 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 
+#ifndef elfxx_h
+#define elfxx_h
+
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -51,7 +54,8 @@ extern int elf_w (get_proc_name_in_image) (unw_addr_space_t as,
                                            struct elf_image *ei,
                                            unsigned long segbase,
                                            unw_word_t ip,
-                                           char *buf, size_t buf_len, unw_word_t *offp);
+                                           char *buf, size_t buf_len, unw_word_t *offp,
+                                           void *arg);
 
 extern int elf_w (get_proc_ip_range) (unw_addr_space_t as,
                                       pid_t pid, unw_word_t ip,
@@ -59,7 +63,8 @@ extern int elf_w (get_proc_ip_range) (unw_addr_space_t as,
 
 extern int elf_w (get_proc_ip_range_in_image) (unw_addr_space_t as, struct elf_image *ei,
                                                unsigned long segbase, unw_word_t ip,
-                                               unw_word_t *start, unw_word_t *end);
+                                               unw_word_t *start, unw_word_t *end,
+                                               void *arg);
 
 extern int elf_w (get_elf_filename) (unw_addr_space_t as, pid_t pid, unw_word_t ip,
                                      char *buf, size_t buf_len, unw_word_t *offp, void *arg);
@@ -128,3 +133,5 @@ static inline const uint8_t* elf_w (get_program_segment) (const struct elf_image
 
   return result;
 }
+
+#endif /* elfxx_h */

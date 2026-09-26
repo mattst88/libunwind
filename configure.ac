@@ -54,6 +54,11 @@ dnl Checks for typedefs, structures, and compiler characteristics.
 AC_C_CONST
 AC_C_INLINE
 AC_TYPE_SIZE_T
+dnl Meson defines _FILE_OFFSET_BITS=64 for the whole project, so do the same
+dnl here.  Otherwise off_t, and with it struct coredump_phdr, differ between
+dnl the two build systems on 32-bit targets, and they cannot share an ABI
+dnl baseline.  Large core files are worth supporting in their own right.
+AC_SYS_LARGEFILE
 AC_CHECK_SIZEOF(off_t)
 
 dnl Checks for header files.
@@ -94,6 +99,12 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
 #endif
 ]])], [ppc_bits=64], [ppc_bits=32])
 
+dnl AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+dnl #ifndef __sparc64__
+dnl # error choke
+dnl #endif
+dnl ]])], [sparc_bits=64], [sparc_bits=32])
+
 AC_DEFUN([SET_ARCH],[
     AS_CASE([$1],
         [aarch64*],[$2=aarch64],
@@ -103,6 +114,7 @@ AC_DEFUN([SET_ARCH],[
         [hppa*],[$2=hppa],
         [mips*],[$2=mips],
         [powerpc*],[$2=ppc$ppc_bits],
+        [sparc*],[$2=sparc64],
         [sh*],[$2=sh],
         [amd64],[$2=x86_64],
         [riscv*],[$2=riscv],
@@ -124,7 +136,7 @@ AC_ARG_ENABLE([coredump],
 )
 AS_IF([test "$enable_coredump" = "check"],
       [AS_CASE([$host_arch],
-               [aarch64*|arm*|mips*|sh*|x86*|riscv*|loongarch64], [enable_coredump=yes],
+               [aarch64*|alpha*|arm*|hppa*|mips*|ppc*|riscv*|s390x*|sh*|sparc64*|x86*|loongarch64], [enable_coredump=yes],
                [enable_coredump=no])]
 )
 AC_MSG_RESULT([$enable_coredump])
@@ -259,6 +271,8 @@ AM_COND_IF([CONFIG_TESTS], [
                         [AC_SUBST([BACKTRACELIB],["$ac_cv_search_backtrace"])])])
   LIBS="$old_LIBS"
   AC_CONFIG_FILES([tests/Makefile])
+  dnl check-namespace.sh reads the built libraries with $NM, which libtool
+  dnl points at the nm that goes with the compiler.
   AC_CONFIG_FILES([tests/check-namespace.sh], [chmod +x tests/check-namespace.sh])
 ])
 AC_ARG_WITH([testdriver],
@@ -284,24 +298,22 @@ AC_MSG_CHECKING([if C++ exception support should be built])
 AC_ARG_ENABLE([cxx_exceptions],
               [AS_HELP_STRING([--enable-cxx-exceptions],
                               [use libunwind to handle C++ exceptions
-                               @<:@default=autodetect@:>@])],
+                               @<:@default=no@:>@])],
               [],
-              [enable_cxx_exceptions=check]
-)
-AS_IF([test $enable_cxx_exceptions = check],
-      [AS_CASE([$target_arch],
-               [aarch64*|alpha*|arm*|hppa*|mips*|x86*|s390x*|loongarch64], [enable_cxx_exceptions=no],
-               [enable_cxx_exceptions=yes])]
+              [enable_cxx_exceptions=no]
 )
 AC_MSG_RESULT([$enable_cxx_exceptions])
 AM_CONDITIONAL([SUPPORT_CXX_EXCEPTIONS], [test x$enable_cxx_exceptions = xyes])
+dnl libtool removes a plain -lc from the libraries of a shared library, which
+dnl with -nostdlib leaves the library with no DT_NEEDED entry for libc and its
+dnl libc references unversioned. Pass -lc straight to the linker instead.
 AM_COND_IF([SUPPORT_CXX_EXCEPTIONS],
            [save_LDFLAGS="$LDFLAGS"
             LDFLAGS="${LDFLAGS} -nostdlib"
             AC_SEARCH_LIBS([_Unwind_Resume],
                            [gcc_s gcc],
                            [AS_IF([test "$ac_cv_search__Unwind_Resume" != "none required"],
-                                  [AC_SUBST([UNW_CRT_LIBADD],  ["-lc $ac_cv_search__Unwind_Resume"])
+                                  [AC_SUBST([UNW_CRT_LIBADD],  ["-XCClinker -lc $ac_cv_search__Unwind_Resume"])
                                    AC_SUBST([UNW_CRT_LDFLAGS], ["-XCClinker -nostdlib"])])
                            ],,
                            [-lc])
@@ -344,8 +356,23 @@ AC_MSG_RESULT([$target_arch])
 AC_MSG_CHECKING([for target operating system])
 AC_MSG_RESULT([$target_os])
 
-AM_CONDITIONAL([XFAIL_PTRACE_TEST], [echo $CFLAGS | grep -q '\-m32\>'])
-AM_CONDITIONAL([CROSS_BUILD], [test x$build != x$host])
+dnl A build for a different host is not necessarily one whose programs
+dnl cannot be run here: a multilib build (--host=i686-pc-linux-gnu with
+dnl CFLAGS=-m32 on an x86_64 machine, say) produces programs that run
+dnl natively, and binfmt_misc may take care of the rest.  The test suite
+dnl uses this to decide whether it can run the shell scripts that drive
+dnl the test programs directly.
+AC_CACHE_CHECK([whether programs built for $host can be run],
+  [libunwind_cv_run_host_binaries],
+  [AC_LINK_IFELSE([AC_LANG_PROGRAM([[]], [[return 0;]])],
+     [if ./conftest$EXEEXT >&AS_MESSAGE_LOG_FD 2>&1; then
+        libunwind_cv_run_host_binaries=yes
+      else
+        libunwind_cv_run_host_binaries=no
+      fi],
+     [libunwind_cv_run_host_binaries=no])])
+AM_CONDITIONAL([RUN_HOST_BINARIES],
+               [test x$libunwind_cv_run_host_binaries = xyes])
 AM_CONDITIONAL(REMOTE_ONLY, test x$target_arch != x$host_arch)
 AM_CONDITIONAL(ARCH_AARCH64, test x$target_arch = xaarch64)
 AM_CONDITIONAL(ARCH_ALPHA, test x$target_arch = xalpha)
@@ -357,6 +384,8 @@ AM_CONDITIONAL(ARCH_X86, test x$target_arch = xx86)
 AM_CONDITIONAL(ARCH_X86_64, test x$target_arch = xx86_64)
 AM_CONDITIONAL(ARCH_PPC32, test x$target_arch = xppc32)
 AM_CONDITIONAL(ARCH_PPC64, test x$target_arch = xppc64)
+AM_CONDITIONAL(ARCH_SPARC, test x$target_arch = xsparc)
+AM_CONDITIONAL(ARCH_SPARC64, test x$target_arch = xsparc64)
 AM_CONDITIONAL(ARCH_SH, test x$target_arch = xsh)
 AM_CONDITIONAL(ARCH_S390X, test x$target_arch = xs390x)
 AM_CONDITIONAL(ARCH_RISCV, test x$target_arch = xriscv)
@@ -369,9 +398,9 @@ AM_CONDITIONAL(OS_SOLARIS, expr x$target_os : xsolaris >/dev/null)
 
 AC_MSG_CHECKING([for ELF helper width])
 AS_CASE([${target_arch}],
-        [arm|hppa|ppc32|x86|sh],           [use_elf32=yes; AC_MSG_RESULT([32])],
-        [aarch64|alpha|ia64|ppc64|x86_64|s390x], [use_elf64=yes; AC_MSG_RESULT([64])],
-        [mips|riscv|loongarch64],          [use_elfxx=yes; AC_MSG_RESULT([xx])],
+        [arm|hppa|ppc32|x86|sh|sparc],                    [use_elf32=yes; AC_MSG_RESULT([32])],
+        [aarch64|alpha|ia64|ppc64|x86_64|s390x|sparc64], [use_elf64=yes; AC_MSG_RESULT([64])],
+        [mips|riscv|loongarch64],                         [use_elfxx=yes; AC_MSG_RESULT([xx])],
         [AC_MSG_ERROR([Unknown ELF target: ${target_arch}])]
 )
 AM_CONDITIONAL(USE_ELF32, [test x$use_elf32 = xyes])
@@ -386,6 +415,12 @@ else
 fi
 AM_CONDITIONAL(USE_DWARF, [test x$use_dwarf = xyes])
 AC_MSG_RESULT([$use_dwarf])
+
+if test x$target_arch = xsparc64; then
+        libdir='${exec_prefix}/lib64'
+        AC_MSG_NOTICE([SPARC64 detected, lib will be installed ${libdir}]);
+        AC_SUBST([libdir])
+fi
 
 AC_MSG_CHECKING([whether to restrict build to remote support])
 AM_COND_IF([REMOTE_ONLY],[
@@ -608,12 +643,68 @@ AS_IF([test x"$ABICHECK" != "x"], [
            ABICHECK=":"
            ABIDIFF=":"]
     )
+], [
+    ABICHECK=":"
+    ABIDIFF=":"
 ])
 AC_SUBST(ABICHECK)
 AC_SUBST(ABIDIFF)
 
 arch="$target_arch"
 ARCH=`echo $target_arch | tr [a-z] [A-Z]`
+
+dnl The ABI dumps do not record the floating-point ABI, so linux-gnueabi,
+dnl linux-gnueabihf, linux-gnuabi64 and friends all share the plain linux-gnu
+dnl baselines.  This also keeps the autotools and Meson builds looking in the
+dnl same place.
+AS_CASE([$target_os],
+  [linux-gnu*], [abi_target_os=linux-gnu],
+  [abi_target_os=$target_os])
+
+dnl Some architecture names cover several incompatible data models, which need
+dnl separate ABI baselines.  Compute a subdirectory name for those, empty for
+dnl everything else.  The probes are compile-only so that they work when
+dnl cross-compiling.
+AC_MSG_CHECKING([for ABI baseline variant])
+abi_variant_dir=""
+AS_CASE([$arch],
+  [mips], [
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#ifndef _ABIO32
+#error not o32
+#endif
+]])], [abi_variant_dir="/o32"])
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#ifndef _ABIN32
+#error not n32
+#endif
+]])], [abi_variant_dir="/n32"])
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#ifndef _ABI64
+#error not n64
+#endif
+]])], [abi_variant_dir="/n64"])
+  ],
+  [riscv], [
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#if __riscv_xlen != 32
+#error not rv32
+#endif
+]])], [abi_variant_dir="/32"], [abi_variant_dir="/64"])
+  ],
+  [ppc64], [
+    dnl glibc's struct _libc_vscr, reachable from ucontext_t, is laid out
+    dnl differently on big- and little-endian ppc64, so the two need separate
+    dnl baselines.
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+#if __BYTE_ORDER__ != __ORDER_BIG_ENDIAN__
+#error not big endian
+#endif
+]])], [abi_variant_dir="/be"], [abi_variant_dir="/le"])
+  ])
+AS_IF([test x"$abi_variant_dir" = x],
+      [AC_MSG_RESULT([none])],
+      [AC_MSG_RESULT([`echo $abi_variant_dir | sed 's,^/,,'`])])
 
 dnl create shell variables from the M4 macros:
 PKG_MAJOR=pkg_major
@@ -625,6 +716,8 @@ PKG_MAINTAINER=pkg_maintainer
 AC_SUBST(build_arch)
 AC_SUBST(target_os)
 AC_SUBST(arch)
+AC_SUBST(abi_variant_dir)
+AC_SUBST(abi_target_os)
 AC_SUBST(ARCH)
 AC_SUBST(LDFLAGS_STATIC_LIBCXA)
 AC_SUBST(LDFLAGS_NOSTARTFILES)
@@ -637,8 +730,8 @@ AC_SUBST(enable_debug_frame)
 
 
 AC_CONFIG_FILES(Makefile src/Makefile
-                include/libunwind-common.h
-                include/libunwind.h include/tdep/libunwind_i.h)
+                include/api/libunwind-common.h
+                include/api/libunwind.h include/tdep/libunwind_i.h)
 AC_CONFIG_FILES(src/unwind/libunwind.pc src/coredump/libunwind-coredump.pc
                 src/ptrace/libunwind-ptrace.pc src/setjmp/libunwind-setjmp.pc
                 src/libunwind-generic.pc)
