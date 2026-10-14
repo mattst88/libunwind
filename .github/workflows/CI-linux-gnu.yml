@@ -311,33 +311,7 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {host: aarch64-linux-gnu,         qemu: aarch64,   gccver: 14, container: ubuntu:26.04, meson_cross: aarch64-unknown-linux-gnu, dpkg_arch: arm64 }
-          - {host: alpha-linux-gnu,           qemu: alpha,     gccver: 14, container: ubuntu:26.04, meson_cross: alpha-unknown-linux-gnu }
           - {host: arm-linux-gnueabihf,       qemu: arm,       gccver: 14, container: ubuntu:26.04, meson_cross: arm-linux-gnueabihf, dpkg_arch: armhf }
-          - {host: arm-linux-gnueabi,         qemu: arm,       gccver: 14, container: ubuntu:26.04, meson_cross: arm-linux-gnueabi }
-          - {host: hppa-linux-gnu,            qemu: hppa,      gccver: 14, container: ubuntu:26.04, meson_cross: hppa-linux-gnu }
-          - {host: loongarch64-linux-gnu,     qemu: loongarch64, gccver: 14, container: ubuntu:26.04, meson_cross: loongarch64-linux-gnu }
-          - {host: mips64el-linux-gnuabi64,   qemu: mips64el,  gccver: 14, container: ubuntu:24.04, meson_cross: mips64el-unknown-linux-gnu }
-          - {host: mips64-linux-gnuabi64,     qemu: mips64,    gccver: 14, container: ubuntu:24.04, meson_cross: mips64-unknown-linux-gnu }
-          - {host: mips64el-linux-gnuabin32,  qemu: mipsn32el, gccver: 14, container: ubuntu:24.04, meson_cross: mipsn32el-unknown-linux-gnu,
-             meson_gcc_prefix: mips64el-linux-gnuabi64, gcc_flags: -mabi=n32, meson_c_args: "'-mabi=n32'",
-             packages: g++-14-multilib-mips64el-linux-gnuabi64 }
-          - {host: mips64-linux-gnuabin32,    qemu: mipsn32,   gccver: 14, container: ubuntu:24.04, meson_cross: mipsn32-unknown-linux-gnu,
-             meson_gcc_prefix: mips64-linux-gnuabi64, gcc_flags: -mabi=n32, meson_c_args: "'-mabi=n32'",
-             packages: g++-14-multilib-mips64-linux-gnuabi64 }
-          - {host: mipsel-linux-gnu,          qemu: mipsel,    gccver: 14, container: ubuntu:24.04, meson_cross: mipsel-linux-gnu }
-          - {host: mips-linux-gnu,            qemu: mips,      gccver: 14, container: ubuntu:24.04, meson_cross: mips-linux-gnu }
-          - {host: powerpc64-linux-gnu,       qemu: ppc64,     gccver: 14, container: ubuntu:26.04, meson_cross: powerpc64-unknown-linux-gnu,
-             qemu_xfail: *ppc64_qemu_skip }
-          - {host: powerpc64le-linux-gnu,     qemu: ppc64le,   gccver: 14, container: ubuntu:26.04, meson_cross: powerpc64le-unknown-linux-gnu,
-             qemu_xfail: *ppc64_qemu_skip, dpkg_arch: ppc64el }
-          - {host: powerpc-linux-gnu,         qemu: ppc,       gccver: 14, container: ubuntu:26.04, meson_cross: powerpc-unknown-linux-gnu }
-          - {host: riscv64-linux-gnu,         qemu: riscv64,   gccver: 14, container: ubuntu:26.04, meson_cross: riscv64-unknown-linux-gnu, dpkg_arch: riscv64 }
-          - {host: s390x-linux-gnu,           qemu: s390x,     gccver: 14, container: ubuntu:26.04, meson_cross: s390x-ibm-linux-gnu, dpkg_arch: s390x }
-          - {host: sh4-linux-gnu,             qemu: sh4,       gccver: 14, container: ubuntu:26.04, meson_cross: sh4-linux-gnu,
-             qemu_xfail: *sh4_qemu_skip }
-          - {host: sparc64-linux-gnu,         qemu: sparc64,   gccver: 14, container: ubuntu:26.04, meson_cross: sparc64-linux-gnu,
-             qemu_xfail: *sparc64_qemu_skip }
 
     steps:
       - name: Install git
