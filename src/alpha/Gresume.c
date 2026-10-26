@@ -32,15 +32,15 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 #ifndef UNW_REMOTE_ONLY
 
 HIDDEN inline int
-alpha_local_resume (unw_addr_space_t as, unw_cursor_t *cursor, void *arg)
+alpha_local_resume (unw_addr_space_t as UNUSED, unw_cursor_t *cursor, void *arg UNUSED)
 {
   struct cursor *c = (struct cursor *) cursor;
   ucontext_t uc = *c->uc;
 
-  uc.uc_mcontext.sc_pc = c->dwarf.ip;
-
   /* Ensure c->pi is up-to-date.  */
   dwarf_make_proc_info (&c->dwarf);
+
+  uc.uc_mcontext.sc_pc = c->dwarf.ip;
 
   switch (c->sigcontext_format)
     {

@@ -298,6 +298,14 @@ extern void unwi_dyn_remote_put_unwind_info (unw_addr_space_t as,
                                              void *arg);
 extern int unwi_dyn_validate_cache (unw_addr_space_t as, void *arg);
 
+#ifndef UNW_REMOTE_ONLY
+#define unwi_iterate_phdr_for_ip        UNWI_OBJ(iterate_phdr_for_ip)
+
+extern int unwi_iterate_phdr_for_ip (unw_addr_space_t as, unw_word_t ip,
+                                     unw_iterate_phdr_callback_t callback,
+                                     void *data);
+#endif
+
 extern unw_dyn_info_list_t _U_dyn_info_list;
 extern pthread_mutex_t _U_dyn_info_list_lock;
 
@@ -428,7 +436,7 @@ static inline void invalidate_edi (struct elf_dyn_info *edi)
 #endif
 
 #ifndef tdep_get_func_addr
-# define tdep_get_func_addr(as,addr,v)          (*(v) = addr, 0)
+# define tdep_get_func_addr(as,addr,v,arg)       (*(v) = addr, 0)
 #endif
 
 #ifndef DWARF_VAL_LOC

@@ -74,8 +74,9 @@ get_unwind_info(struct UCD_info *ui, unw_addr_space_t as, unw_word_t ip)
 
   /* segbase: where it is mapped in virtual memory */
   segbase = phdr->p_vaddr;
-  /* mapoff doesn't matter since the entire file is loaded */
-  mapoff  = 0;
+  /* mapoff: file offset of this mapping (from NT_FILE), needed to correctly
+   * compute load_base for PIE binaries */
+  mapoff  = phdr->p_mapoff;
 
   /* Here, SEGBASE is the starting-address of the (mmap'ped) segment
      which covers the IP we're looking for.  */
@@ -127,7 +128,8 @@ _UCD_find_proc_info (unw_addr_space_t as, unw_word_t ip, unw_proc_info_t *pi,
   }
 
 #if UNW_TARGET_IA64
-  if (ui->edi.ktab.format != -1)
+  if (ui->edi.ktab.format != -1
+      && ip >= ui->edi.ktab.start_ip && ip < ui->edi.ktab.end_ip)
     {
       /* The kernel unwind table resides in local memory, so we have
          to use the local address space to search it.  Since
@@ -159,14 +161,22 @@ _UCD_find_proc_info (unw_addr_space_t as, unw_word_t ip, unw_proc_info_t *pi,
                                     pi, need_unwind_info, arg);
 
 #if UNW_TARGET_ARM
-  if (ret == -UNW_ENOINFO && ui->edi.di_arm.format != -1)
-    ret = tdep_search_unwind_table (as, ip, &ui->edi.di_arm, pi,
-                                    need_unwind_info, arg);
-#endif
-
+  /* Try .debug_frame before .ARM.exidx: exidx CANTUNWIND entries cover the
+   * entire range from one function start to the next, so a CANTUNWIND for a
+   * leaf function bleeds into the following non-leaf.  The DWARF .debug_frame
+   * has per-function FDEs and gives the correct result. */
   if (ret == -UNW_ENOINFO && ui->edi.di_debug.format != -1)
     ret = tdep_search_unwind_table (as, ip, &ui->edi.di_debug, pi,
                                     need_unwind_info, arg);
+
+  if (ret == -UNW_ENOINFO && ui->edi.di_arm.format != -1)
+    ret = tdep_search_unwind_table (as, ip, &ui->edi.di_arm, pi,
+                                    need_unwind_info, arg);
+#else
+  if (ret == -UNW_ENOINFO && ui->edi.di_debug.format != -1)
+    ret = tdep_search_unwind_table (as, ip, &ui->edi.di_debug, pi,
+                                    need_unwind_info, arg);
+#endif
 
   Debug(1, "returns %d\n", ret);
 

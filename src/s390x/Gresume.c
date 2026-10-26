@@ -32,7 +32,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 #ifndef UNW_REMOTE_ONLY
 
 HIDDEN inline int
-s390x_local_resume (unw_addr_space_t as, unw_cursor_t *cursor, void *arg)
+s390x_local_resume (unw_addr_space_t as UNUSED, unw_cursor_t *cursor, void *arg UNUSED)
 {
   struct cursor *c = (struct cursor *) cursor;
   ucontext_t uc = *c->uc;
@@ -40,13 +40,13 @@ s390x_local_resume (unw_addr_space_t as, unw_cursor_t *cursor, void *arg)
   struct sigcontext *sc = NULL;
   int i;
   unw_word_t sp, ip;
-  uc.uc_mcontext.psw.addr = c->dwarf.ip;
-
   /* Ensure c->pi is up-to-date.  On x86-64, it's relatively common to
      be missing DWARF unwind info.  We don't want to fail in that
      case, because the frame-chain still would let us do a backtrace
      at least.  */
   dwarf_make_proc_info (&c->dwarf);
+
+  uc.uc_mcontext.psw.addr = c->dwarf.ip;
 
   switch (c->sigcontext_format)
     {

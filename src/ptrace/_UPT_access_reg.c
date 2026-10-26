@@ -36,6 +36,9 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 
 #if HAVE_DECL_PTRACE_SETREGSET && (defined(__linux__) && !defined(UNW_TARGET_X86))
 #include <sys/uio.h>
+#ifdef UNW_TARGET_SPARC64
+#include <sys/procfs.h>
+#endif
 int
 _UPT_access_reg (unw_addr_space_t as UNUSED, unw_regnum_t reg, unw_word_t *val,
                  int write, void *arg)
@@ -65,15 +68,18 @@ _UPT_access_reg (unw_addr_space_t as UNUSED, unw_regnum_t reg, unw_word_t *val,
   r = (char *)&regs + _UPT_reg_offset[reg];
 
 #ifdef UNW_TARGET_ALPHA
-  /* Alpha kernels before 7.1 do not support PTRACE_GETREGSET.
-     Try it once and fall back to PTRACE_PEEKUSER on older kernels. */
+  /* Alpha kernels before 7.1 do not support PTRACE_GETREGSET, and 7.1
+     and 7.2 return struct pt_regs, which is shorter than elf_gregset_t
+     and laid out differently.  Try it once and fall back to
+     PTRACE_PEEKUSER on those kernels. */
   {
     static int getregset_supported = -1;
 
     if (getregset_supported == 0)
       goto use_peekuser;
 
-    if (ptrace (PTRACE_GETREGSET, pid, NT_PRSTATUS, &loc) == -1)
+    if (ptrace (PTRACE_GETREGSET, pid, NT_PRSTATUS, &loc) == -1
+        || loc.iov_len != sizeof (regs))
       {
         if (getregset_supported < 0)
           {
@@ -97,18 +103,13 @@ _UPT_access_reg (unw_addr_space_t as UNUSED, unw_regnum_t reg, unw_word_t *val,
 
 use_peekuser:
   {
-    /* _UPT_reg_offset uses gregset layout where PC is at index 31.
-       PTRACE_PEEKUSER uses a different layout where PC is at index 32.
-       GPR offsets 0-30 are the same in both layouts. */
-    long offset = _UPT_reg_offset[reg];
-    if (reg == UNW_ALPHA_PC)
-      offset = 0x100;  /* ptrace index 32 */
-
+    /* PTRACE_PEEKUSER takes a register index, not a byte offset, and
+       the kernel's indices match the UNW_ALPHA_* numbers. */
     errno = 0;
     if (write)
-      ptrace (PTRACE_POKEUSER, pid, offset, *val);
+      ptrace (PTRACE_POKEUSER, pid, reg, *val);
     else
-      *val = ptrace (PTRACE_PEEKUSER, pid, offset, 0);
+      *val = ptrace (PTRACE_PEEKUSER, pid, reg, 0);
     if (errno)
       goto badreg;
     return 0;

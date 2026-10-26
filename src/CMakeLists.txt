@@ -2,9 +2,11 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # other source files
 include_directories(../include/tdep)
+include_directories(../include/api)
 include_directories(../include)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/../include/tdep)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/../include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/../include/api)
 
 if(TARGET_ARM)
     # Ensure that the remote and local unwind code can reside in the same binary without name clashing
@@ -63,6 +65,7 @@ SET(libunwind_la_SOURCES_generic
     mi/Gset_caching_policy.c
     mi/Gset_cache_size.c
     mi/Gset_iterate_phdr_function.c
+    mi/Giterate_phdr_for_ip.c
     mi/Gget_elf_filename.c
 )
 
@@ -148,6 +151,7 @@ SET(libunwind_la_SOURCES_local_nounwind
     mi/Lset_caching_policy.c
     mi/Lset_cache_size.c
     mi/Lset_iterate_phdr_function.c
+    mi/Literate_phdr_for_ip.c
     mi/Lget_elf_filename.c
 )
 

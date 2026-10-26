@@ -75,7 +75,7 @@ trace_cache_free (void *arg)
   Debug(5, "freed cache %p\n", cache);
 }
 
-/* Initialise frame tracing for threaded use. */
+/* Initialize frame tracing for threaded use. */
 static void
 trace_cache_init_once (void)
 {
@@ -98,8 +98,8 @@ trace_cache_buckets (size_t n)
   return frames;
 }
 
-/* Allocate and initialise hash table for frame cache lookups.
-   Returns the cache initialised with (1ULL << HASH_LOW_BITS) hash
+/* Allocate and initialize hash table for frame cache lookups.
+   Returns the cache initialized with (1ULL << HASH_LOW_BITS) hash
    buckets, or NULL if there was a memory allocation problem. */
 static unw_trace_cache_t *
 trace_cache_create (void)
@@ -205,7 +205,7 @@ trace_cache_get (void)
   }
 }
 
-/* Initialise frame properties for address cache slot F at address
+/* Initialize frame properties for address cache slot F at address
    PC using current CFA, R7 and SP values.  Modifies CURSOR to
    that location, performs one unw_step(), and fills F with what
    was discovered about the location.  Returns F.
@@ -225,7 +225,7 @@ trace_init_addr (unw_tdep_frame_t *f,
   struct dwarf_cursor *d = &c->dwarf;
   int ret = -UNW_EINVAL;
 
-  /* Initialise frame properties: unknown, not last. */
+  /* Initialize frame properties: unknown, not last. */
   f->virtual_address = pc;
   f->frame_type = UNW_ARM_FRAME_OTHER;
   f->last_frame = 0;
@@ -403,7 +403,7 @@ tdep_trace (unw_cursor_t *cursor, void **buffer, int *size)
   struct cursor *c = (struct cursor *) cursor;
   struct dwarf_cursor *d = &c->dwarf;
   unw_trace_cache_t *cache;
-  unw_word_t sp, pc, cfa, r7, lr;
+  unw_word_t sp, pc, cfa, r7, lr = 0;
   int maxdepth = 0;
   int depth = 0;
   int ret;
@@ -441,7 +441,7 @@ tdep_trace (unw_cursor_t *cursor, void **buffer, int *size)
   {
     pc -= d->use_prev_instr;
     Debug (2, "depth %d cfa 0x%x pc 0x%x sp 0x%x r7 0x%x lr 0x%lx\n",
-           depth, cfa, pc, sp, r7);
+           depth, cfa, pc, sp, r7, lr);
 
     /* See if we have this address cached.  If not, evaluate enough of
        the dwarf unwind information to fill the cache line data, or to
@@ -478,6 +478,7 @@ tdep_trace (unw_cursor_t *cursor, void **buffer, int *size)
     case UNW_ARM_FRAME_GUESSED:
       /* Fall thru to standard processing after forcing validation. */
       c->validate = 1;
+      FALLTHROUGH;
 
     case UNW_ARM_FRAME_STANDARD:
       /* Advance standard traceable frame. */

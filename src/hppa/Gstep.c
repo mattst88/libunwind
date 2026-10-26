@@ -162,6 +162,9 @@ hppa_handle_signal_frame (unw_cursor_t *cursor)
       return ret;
     }
 
+  c->dwarf.pi_valid = 0;
+  c->dwarf.use_prev_instr = 0;
+
 #if 0
   /* Set SP/CFA and PC/IP.  */
   dwarf_get (&c->dwarf, c->dwarf.loc[UNW_TDEP_SP], &c->dwarf.cfa);
@@ -185,13 +188,18 @@ unw_step (unw_cursor_t *cursor)
 
   /* Special handling the signal frame. */
   if (unw_is_signal_frame (cursor) > 0)
-    return hppa_handle_signal_frame (cursor);
+    {
+      ret = hppa_handle_signal_frame (cursor);
+      c->validate = validate;
+      return ret;
+    }
+
+  /* Try DWARF-based unwinding... */
+  c->sigcontext_format = HPPA_SCF_NONE;
+  ret = dwarf_step (&c->dwarf);
 
   /* Restore default memory validation state */
   c->validate = validate;
-
-  /* Try DWARF-based unwinding... */
-  ret = dwarf_step (&c->dwarf);
 
   if (unlikely (ret == -UNW_ESTOPUNWIND))
     return ret;

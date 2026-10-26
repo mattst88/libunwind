@@ -1,0 +1,160 @@
+#!/bin/bash
+# exe_wrapper for Meson cross-builds that runs binaries under qemu-user.
+# Tests whose basename appears in --xfail exit 77 (SKIP) on failure rather
+# than propagating the non-zero exit code, avoiding false FAIL results for
+# known QEMU user-mode limitations.
+
+set -u
+
+usage() {
+    cat >&2 <<EOF
+Usage: meson-qemu-exe-wrapper --qemu=CMD [--gcc=COMPILER]
+                               [--sysroot=PATH] [--ldpath=PATH]
+                               [--xfail=NAME:NAME:...]
+                               [--xfail-before-version=X.Y.Z]
+                               BINARY [ARGS...]
+
+--gcc       Cross compiler; used to auto-detect --sysroot (via
+            --print-sysroot, falling back to /usr/<target> from -dumpmachine)
+            and --ldpath (via --print-file-name=libgcc_s.so.1 or libgcc_s.so)
+            when those options are not given explicitly.
+--gcc-flags Extra flags passed to --gcc when querying it (e.g. -mabi=n32).
+--xfail-before-version
+            Only treat --xfail tests as SKIP when the running QEMU version
+            is older than X.Y.Z; pass through the real exit code once QEMU
+            is fixed.
+EOF
+    exit 2
+}
+
+# Returns 0 (true) if version $1 < $2.
+version_lt() {
+    awk -v v1="$1" -v v2="$2" 'BEGIN {
+        n = split(v1, a, ".")
+        m = split(v2, b, ".")
+        top = (n > m) ? n : m
+        for (i = 1; i <= top; i++) {
+            x = (i <= n) ? int(a[i]) : 0
+            y = (i <= m) ? int(b[i]) : 0
+            if (x < y) { exit 0 }
+            if (x > y) { exit 1 }
+        }
+        exit 1
+    }'
+}
+
+qemu_cmd=
+gcc_cmd=
+gcc_flags=
+qemu_sysroot=
+qemu_ldpath=
+xfail_list=
+xfail_before_ver=
+
+while [ $# -gt 0 ]; do
+    case $1 in
+    --qemu=*)                 qemu_cmd="${1#--qemu=}" ;;
+    --gcc=*)                  gcc_cmd="${1#--gcc=}" ;;
+    --gcc-flags=*)            gcc_flags="${1#--gcc-flags=}" ;;
+    --sysroot=*)              qemu_sysroot="${1#--sysroot=}" ;;
+    --ldpath=*)               qemu_ldpath="${1#--ldpath=}" ;;
+    --xfail=*)                xfail_list="${1#--xfail=}" ;;
+    --xfail-before-version=*) xfail_before_ver="${1#--xfail-before-version=}" ;;
+    --)                       shift; break ;;
+    -*)                       echo "$0: unknown option: $1" >&2; usage ;;
+    *)                        break ;;
+    esac
+    shift
+done
+
+[ -z "$qemu_cmd" ] && { echo "$0: --qemu is required" >&2; usage; }
+[ $# -eq 0 ] && { echo "$0: missing binary argument" >&2; usage; }
+
+if [ -n "$gcc_cmd" ]; then
+    # shellcheck disable=SC2086
+    if [ -z "$qemu_sysroot" ]; then
+        qemu_sysroot=$("$gcc_cmd" $gcc_flags --print-sysroot 2>/dev/null)
+        # Some cross toolchains (e.g. Ubuntu's apt packages) don't set a
+        # sysroot via --print-sysroot; fall back to /usr/<target-triple>.
+        if [ -z "$qemu_sysroot" ] || [ "$qemu_sysroot" = "/" ]; then
+            gcc_target=$("$gcc_cmd" $gcc_flags -dumpmachine 2>/dev/null)
+            if [ -n "$gcc_target" ] && [ -d "/usr/$gcc_target" ]; then
+                qemu_sysroot="/usr/$gcc_target"
+            else
+                qemu_sysroot=
+            fi
+        fi
+    fi
+    if [ -z "$qemu_ldpath" ]; then
+        # --print-file-name returns the input unchanged when the file is not
+        # found.  libgcc_s.so covers targets with another soname (hppa: .so.4).
+        for lib in libgcc_s.so.1 libgcc_s.so; do
+            libgcc=$("$gcc_cmd" $gcc_flags --print-file-name=$lib 2>/dev/null)
+            [ "$libgcc" != "$lib" ] && { qemu_ldpath=$(dirname "$libgcc"); break; }
+        done
+    fi
+fi
+
+qemu_call=("$qemu_cmd")
+[ -n "$qemu_sysroot" ] && qemu_call+=(-L "$qemu_sysroot")
+[ -n "$qemu_ldpath"  ] && qemu_call+=(-E "LD_LIBRARY_PATH=$qemu_ldpath")
+
+# Print a backtrace from the core qemu wrote for the binary, if gdb-multiarch
+# is installed.
+print_backtrace() {
+    local exe=$1 core=$2 libpath multiarch at_entry e_entry
+    command -v gdb-multiarch >/dev/null || return
+
+    libpath=${qemu_ldpath}:${LD_LIBRARY_PATH:-}
+    if [ -n "$gcc_cmd" ]; then
+        # Foreign-architecture packages are installed in the host's
+        # multiarch directories, which qemu falls back to.
+        # shellcheck disable=SC2086
+        multiarch=$("$gcc_cmd" $gcc_flags --print-multiarch 2>/dev/null)
+        [ -n "$multiarch" ] && libpath=$libpath:/lib/$multiarch:/usr/lib/$multiarch
+    fi
+
+    # qemu doesn't dump the executable's program headers, so gdb can't tell
+    # where a PIE was loaded. Relocate it by AT_ENTRY - e_entry, rounded down
+    # to a page since gdb strips the Thumb bit from e_entry.
+    read -r at_entry e_entry < <(
+        gdb-multiarch -batch -ex 'info auxv' -ex 'info files' "$exe" "$core" 2>/dev/null |
+        sed -n -e 's/.*AT_ENTRY .* //p' -e 's/.*Entry point: //p' | tr '\n' ' ')
+    [ -n "$e_entry" ] || at_entry=0 e_entry=0
+
+    gdb-multiarch -batch -iex "set sysroot ${qemu_sysroot:-/}" \
+        -iex "set solib-search-path $libpath" \
+        -ex "symbol-file -o $(( (at_entry - e_entry) & ~0xfff )) $exe" -ex sharedlibrary \
+        -ex 'thread apply all bt' "$exe" "$core" >&2
+}
+
+# Run qemu in the background to learn its PID, which names the core it writes
+# in the working directory.
+"${qemu_call[@]}" "$@" <&0 &
+qemu_pid=$!
+wait $qemu_pid
+estatus=$?
+cores=(qemu_"$(basename "$1")"_*_"$qemu_pid".core)
+[ -f "${cores[0]}" ] || cores=()
+
+if [ $estatus -ne 0 ] && [ -n "$xfail_list" ]; then
+    test_basename=$(basename "$1")
+    IFS=: read -ra xfail_names <<< "$xfail_list"
+    for name in "${xfail_names[@]}"; do
+        if [ "$test_basename" = "$name" ]; then
+            # If a version gate is set, only skip when QEMU is older than it.
+            if [ -n "$xfail_before_ver" ]; then
+                qemu_ver=$("$qemu_cmd" --version 2>/dev/null \
+                           | sed -n 's/.*version \([0-9][0-9.]*\).*/\1/p' \
+                           | head -1)
+                version_lt "$qemu_ver" "$xfail_before_ver" || break
+            fi
+            rm -f "${cores[@]}"
+            exit 77
+        fi
+    done
+fi
+
+[ ${#cores[@]} -gt 0 ] && print_backtrace "$1" "${cores[0]}"
+
+exit $estatus

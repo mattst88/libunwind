@@ -39,7 +39,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 # endif
 #endif
 
-#if defined(__GLIBC__)
+/* ia64 has its own {sig,}setjmp, which doesn't obfuscate the jmp_buf.  */
+#if defined(__GLIBC__) && !defined(__ia64__)
 #if __GLIBC_PREREQ(2, 4)
 
 /* Starting with glibc-2.4, {sig,}setjmp in GLIBC obfuscates the
@@ -132,6 +133,11 @@ siglongjmp (sigjmp_buf env, int val)
           || unw_set_reg (&c, UNW_REG_IP, (unw_word_t) (uintptr_t) cont))
         abort ();
 #endif /* defined(__linux__) && !defined(__GLIBC__) */
+
+      /* siglongjmp() restores the saved mask itself, and leaves the mask
+         alone when sigsetjmp() did not save one.  */
+      install_resume_sigmask (&c, cont == &_UI_siglongjmp_cont
+                                  ? (sigset_t *) &wp[JB_MASK] : NULL);
 
       unw_resume (&c);
 

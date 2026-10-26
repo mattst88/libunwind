@@ -101,7 +101,13 @@ unw_step (unw_cursor_t *cursor)
 
   /* Check if this is a signal frame. */
   if (unw_is_signal_frame (cursor) > 0)
-     return arm_handle_signal_frame (cursor);
+    {
+      ret = arm_handle_signal_frame (cursor);
+      c->validate = validate;
+      return ret;
+    }
+
+  c->sigcontext_format = ARM_SCF_NONE;
 
   /* First, try extbl-based unwinding. */
   if (UNW_TRY_METHOD (UNW_ARM_METHOD_EXIDX))
@@ -129,6 +135,10 @@ unw_step (unw_cursor_t *cursor)
       Debug (13, "%s(ret=%d), trying extbl\n",
              UNW_TRY_METHOD(UNW_ARM_METHOD_EXIDX) ? "arm_exidx_step() failed " : "",
              ret);
+      /* Save LR loc before dwarf_step: for leaf functions the FDE has no CFI
+       * opcodes, so apply_reg_state marks all registers UNDEF (NULL_LOC) and
+       * returns 0.  We recover by reading the actual LR from the saved loc. */
+      dwarf_loc_t saved_r14_loc = c->dwarf.loc[UNW_ARM_R14];
       ret = dwarf_step (&c->dwarf);
       Debug(1, "dwarf_step()=%d\n", ret);
 
@@ -136,6 +146,25 @@ unw_step (unw_cursor_t *cursor)
         {
           c->validate = validate;
           return 1;
+        }
+
+      if (ret == 0 && !has_stopunwind)
+        {
+          /* DWARF signaled end-of-stack (undefined return address).  For ARM
+           * leaf functions the compiler emits an empty FDE with no r14 save
+           * opcode; LR still holds the caller's return address.  Try it. */
+          unw_word_t lr;
+          if (!DWARF_IS_NULL_LOC (saved_r14_loc)
+              && dwarf_get (&c->dwarf, saved_r14_loc, &lr) >= 0
+              && lr != 0)
+            {
+              c->dwarf.ip = lr;
+              c->dwarf.loc[UNW_ARM_R14] = DWARF_NULL_LOC;
+              c->dwarf.use_prev_instr = 1;
+              c->dwarf.pi_valid = 0;
+              c->validate = validate;
+              return 1;
+            }
         }
 
       if (ret < 0 && ret != -UNW_ENOINFO)

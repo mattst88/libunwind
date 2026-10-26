@@ -33,6 +33,16 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 #include "mempool.h"
 #include <stdatomic.h>
 
+#ifndef UNW_REMOTE_ONLY
+# if defined(HAVE_LINK_H)
+#  include <link.h>
+# elif defined(HAVE_SYS_LINK_H)
+#  include <sys/link.h>
+# else
+#  error Could not find <link.h>
+# endif
+#endif
+
 typedef struct
   {
     /* no ia64-specific fast trace */
@@ -151,6 +161,10 @@ struct MAY_ALIAS cursor
     uint16_t last_abi_marker;   /* last abi_marker encountered so far */
     uint8_t eh_valid_mask;
 
+    /* These belong with rbs_area below, but fit into padding here.  */
+    uint8_t rbs_curr;           /* index of curr. rbs-area (contains c->bsp) */
+    uint8_t rbs_left_edge;      /* index of inner-most valid rbs-area */
+
     unsigned int pi_valid :1;           /* is proc_info valid? */
     unsigned int pi_is_dynamic :1; /* proc_info found via dynamic proc info? */
     unw_proc_info_t pi;         /* info about current procedure */
@@ -171,8 +185,6 @@ struct MAY_ALIAS cursor
        register may not have gotten spilled until much later, when a
        possibly different rbs-area might have been in effect
        already.  */
-    uint8_t rbs_curr;           /* index of curr. rbs-area (contains c->bsp) */
-    uint8_t rbs_left_edge;      /* index of inner-most valid rbs-area */
     struct rbs_area
       {
         unw_word_t end;
@@ -182,11 +194,14 @@ struct MAY_ALIAS cursor
     rbs_area[96 + 2];   /* 96 stacked regs + 1 extra stack on each side... */
 };
 
+_Static_assert (sizeof (struct cursor) <= sizeof (unw_cursor_t),
+                "struct cursor does not fit in unw_cursor_t");
+
 struct ia64_global_unwind_state
   {
     pthread_mutex_t lock;               /* global data lock */
 
-    volatile char init_done;
+    atomic_bool init_done;
 
     /* Table of registers that prologues can save (and order in which
        they're saved).  */
@@ -222,7 +237,7 @@ struct ia64_global_unwind_state
 /* Platforms that support UNW_INFO_FORMAT_TABLE need to define
    tdep_search_unwind_table.  */
 #define tdep_search_unwind_table        unw_search_ia64_unwind_table
-#define tdep_find_unwind_table  ia64_find_unwind_table
+#define tdep_find_unwind_table          UNW_OBJ(find_unwind_table)
 #define tdep_find_proc_info             UNW_OBJ(find_proc_info)
 #define tdep_uc_addr                    UNW_OBJ(uc_addr)
 #define tdep_get_elf_image              UNW_ARCH_OBJ(get_elf_image)
@@ -251,7 +266,7 @@ struct ia64_global_unwind_state
 
 extern void tdep_init (void);
 extern int tdep_find_unwind_table (struct elf_dyn_info *edi,
-                                   unw_addr_space_t as, char *path,
+                                   unw_addr_space_t as, const char *path,
                                    unw_word_t segbase, unw_word_t mapoff,
                                    unw_word_t ip);
 extern int tdep_find_proc_info (unw_addr_space_t as, unw_word_t ip,

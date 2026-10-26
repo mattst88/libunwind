@@ -97,7 +97,7 @@ struct MAY_ALIAS cursor
                                  tdep_uc_addr((c)->as_arg, (r)), 0))
 
 static inline int
-dwarf_getvr (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t * val)
+dwarf_getvr (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_fpreg_t * val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -106,7 +106,7 @@ dwarf_getvr (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t * val)
 }
 
 static inline int
-dwarf_putvr (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t val)
+dwarf_putvr (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_fpreg_t val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -115,7 +115,7 @@ dwarf_putvr (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t val)
 }
 
 static inline int
-dwarf_getfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t *val)
+dwarf_getfp (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_fpreg_t *val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -124,7 +124,7 @@ dwarf_getfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t *val)
 }
 
 static inline int
-dwarf_putfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t val)
+dwarf_putfp (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_fpreg_t val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -133,7 +133,7 @@ dwarf_putfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t val)
 }
 
 static inline int
-dwarf_get (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t *val)
+dwarf_get (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_word_t *val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -142,7 +142,7 @@ dwarf_get (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t *val)
 }
 
 static inline int
-dwarf_put (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t val)
+dwarf_put (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_word_t val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -371,6 +371,6 @@ extern int tdep_access_reg (struct cursor *c, unw_regnum_t reg,
 extern int tdep_access_fpreg (struct cursor *c, unw_regnum_t reg,
                               unw_fpreg_t * valp, int write);
 extern int tdep_get_func_addr (unw_addr_space_t as, unw_word_t addr,
-                               unw_word_t *entry_point);
+                               unw_word_t *entry_point, void *arg);
 
 #endif /* PPC64_LIBUNWIND_I_H */

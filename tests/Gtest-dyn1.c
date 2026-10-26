@@ -96,7 +96,7 @@ template (int i, template_t self,
 {
   (*printer) (fmt, arr[11 - i][0], arr[11 - i] + 1);
   if (i > 0)
-    (*self) (i - 1, self, printer, fmt, arr);
+    (*self) (i - 1, (void (*) ()) self, printer, fmt, arr);
 }
 
 static void
@@ -141,6 +141,10 @@ sighandler (int signal)
 	printf ("ip = %lx <%s%s>\n", (long) ip, name, off);
       ++count;
 
+      /* The frames above main() depend on the C library.  */
+      if (strcmp (name, "main") == 0)
+	break;
+
       if (count > 20)
 	{
 	  panic ("Too many steps (%d)\n", count);
@@ -150,8 +154,9 @@ sighandler (int signal)
     }
   while (unw_step (&cursor) > 0);
 
-  if (count != 13)
-    panic ("FAILURE: expected 13, not %d frames below signal frame\n", count);
+  if (strcmp (name, "main") != 0 || count != 11)
+    panic ("FAILURE: expected main() at frame 11, not <%s> at frame %d\n",
+	   name, count);
 
   if (verbose)
     printf ("SUCCESS\n");
@@ -214,9 +219,9 @@ main (int argc, char *argv[] UNUSED)
   funcp = get_funcp (fdesc);
 
   if (verbose)
-    (*funcp) (10, funcp, printf, "iteration %c%s\n", strarr);
+    (*funcp) (10, (void (*) ()) funcp, printf, "iteration %c%s\n", strarr);
   else
-    (*funcp) (10, funcp, dev_null, "iteration %c%s\n", strarr);
+    (*funcp) (10, (void (*) ()) funcp, dev_null, "iteration %c%s\n", strarr);
 
   _U_dyn_cancel (&di);
   return -1;

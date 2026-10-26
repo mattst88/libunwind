@@ -43,10 +43,20 @@ unw_step (unw_cursor_t *cursor)
   if (unw_is_signal_frame (cursor) > 0)
     {
       ret = x86_handle_signal_frame(cursor);
-      return 1;
+      if (ret >= 0)
+        ret = dwarf_get (&c->dwarf, c->dwarf.loc[EIP], &c->dwarf.ip);
+      c->dwarf.pi_valid = 0;
+      c->validate = validate;
+      if (ret < 0)
+        {
+          Debug (2, "returning %d\n", ret);
+          return ret;
+        }
+      return (c->dwarf.ip == 0) ? 0 : 1;
     }
 
   /* Try DWARF-based unwinding... */
+  c->sigcontext_format = X86_SCF_NONE;
   ret = dwarf_step (&c->dwarf);
   c->validate = validate;
 
@@ -58,7 +68,12 @@ unw_step (unw_cursor_t *cursor)
 
   if (unlikely (ret < 0))
     {
-      /* DWARF failed, let's see if we can follow the frame-chain */
+      /* DWARF failed, let's see if we can follow the frame-chain.  This is
+         guesswork: without unwind info there is nothing that says EBP holds
+         a frame pointer here, so a read that fails means the guess was
+         wrong, not that the target is broken.  Report the end of the stack
+         rather than an error in that case, as there is nowhere left to go
+         either way.  */
       struct dwarf_loc ebp_loc, eip_loc, esp_loc;
 
 
@@ -67,8 +82,9 @@ unw_step (unw_cursor_t *cursor)
       ret = dwarf_get (&c->dwarf, c->dwarf.loc[EBP], &c->dwarf.cfa);
       if (ret < 0)
         {
-          Debug (2, "returning %d\n", ret);
-          return ret;
+          Debug (13, "dwarf_get([EBP=0x%x]) failed\n", DWARF_GET_LOC (c->dwarf.loc[EBP]));
+          Debug (2, "returning 0\n");
+          return 0;
         }
 
       Debug (13, "[EBP=0x%x] = 0x%x\n", DWARF_GET_LOC (c->dwarf.loc[EBP]), c->dwarf.cfa);
@@ -98,8 +114,7 @@ unw_step (unw_cursor_t *cursor)
           if (ret < 0)
             {
               Debug (13, "dwarf_get([EIP=0x%x]) failed\n", DWARF_GET_LOC (c->dwarf.loc[EIP]));
-              Debug (2, "returning %d\n", ret);
-              return ret;
+              c->dwarf.ip = 0;
             }
           else
             {

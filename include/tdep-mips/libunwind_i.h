@@ -96,7 +96,7 @@ typedef long mips_reg_t;
 
 /* FIXME: Implement these for the MIPS FPU.  */
 static inline int
-dwarf_getfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t *val)
+dwarf_getfp (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_fpreg_t *val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -105,7 +105,7 @@ dwarf_getfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t *val)
 }
 
 static inline int
-dwarf_putfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t val)
+dwarf_putfp (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_fpreg_t val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -114,7 +114,7 @@ dwarf_putfp (struct dwarf_cursor *c, dwarf_loc_t loc, unw_fpreg_t val)
 }
 
 static inline int
-dwarf_get (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t *val)
+dwarf_get (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_word_t *val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -123,7 +123,7 @@ dwarf_get (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t *val)
 }
 
 static inline int
-dwarf_put (struct dwarf_cursor *c, dwarf_loc_t loc, unw_word_t val)
+dwarf_put (struct dwarf_cursor *c UNUSED, dwarf_loc_t loc, unw_word_t val)
 {
   if (!DWARF_GET_LOC (loc))
     return -1;
@@ -174,7 +174,7 @@ read_s32 (struct dwarf_cursor *c, unw_word_t addr, unw_word_t *val)
   if ((offset != 0) == tdep_big_endian (c->as))
     *val = (int32_t) memval;
   else
-    *val = (int32_t) (memval >> 32);
+    *val = (int32_t) ((uint64_t) memval >> 32);
 
   return 0;
 }
@@ -204,7 +204,7 @@ write_s32 (struct dwarf_cursor *c, unw_word_t addr, const unw_word_t *val)
   if ((offset != 0) == tdep_big_endian (c->as))
     memval = (memval & ~(unw_word_t) 0xffffffffU) | (uint32_t) *val;
   else
-    memval = (memval & (unw_word_t) 0xffffffffU) | ((unw_word_t) (uint32_t) *val << 32);
+    memval = (memval & (unw_word_t) 0xffffffffU) | (unw_word_t) ((uint64_t) (uint32_t) *val << 32);
 
   return (*c->as->acc.access_mem) (c->as, addr - offset, &memval, 1, c->as_arg);
 }

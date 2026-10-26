@@ -36,12 +36,11 @@ tdep_access_reg (struct cursor *c, unw_regnum_t reg, unw_word_t *valp,
     case UNW_SH_PC:
       if (write)
         c->dwarf.ip = *valp;            /* update the IP cache */
+      FALLTHROUGH;
     case UNW_SH_R0:
     case UNW_SH_R1:
     case UNW_SH_R2:
     case UNW_SH_R3:
-    case UNW_SH_R4:
-    case UNW_SH_R5:
     case UNW_SH_R6:
     case UNW_SH_R7:
     case UNW_SH_R8:
@@ -52,6 +51,30 @@ tdep_access_reg (struct cursor *c, unw_regnum_t reg, unw_word_t *valp,
     case UNW_SH_R13:
     case UNW_SH_R14:
     case UNW_SH_PR:
+      loc = c->dwarf.loc[reg];
+      break;
+
+    case UNW_SH_R4:
+    case UNW_SH_R5:
+      /* R4 and R5 are the exception data registers (UNW_TDEP_EH).
+         They are scratch registers never tracked by DWARF CFI, so
+         _Unwind_SetGR stores values in eh_args[] for establish_machine_state
+         to forward to uc_mcontext at resume time.  */
+      {
+        unsigned int idx = reg - UNW_TDEP_EH;
+        unsigned int mask = 1u << idx;
+        if (write)
+          {
+            c->dwarf.eh_args[idx] = *valp;
+            c->dwarf.eh_valid_mask |= mask;
+            return 0;
+          }
+        if (c->dwarf.eh_valid_mask & mask)
+          {
+            *valp = c->dwarf.eh_args[idx];
+            return 0;
+          }
+      }
       loc = c->dwarf.loc[reg];
       break;
 
@@ -73,8 +96,8 @@ tdep_access_reg (struct cursor *c, unw_regnum_t reg, unw_word_t *valp,
 }
 
 HIDDEN int
-tdep_access_fpreg (struct cursor *c, unw_regnum_t reg, unw_fpreg_t *valp,
-                   int write)
+tdep_access_fpreg (struct cursor *c UNUSED, unw_regnum_t reg, unw_fpreg_t *valp UNUSED,
+                   int write UNUSED)
 {
   Debug (1, "bad register number %u\n", reg);
   return -UNW_EBADREG;

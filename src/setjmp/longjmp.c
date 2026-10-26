@@ -35,7 +35,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
 #include "jmpbuf.h"
 #include "setjmp_i.h"
 
-#if defined(__GLIBC__)
+/* ia64 has its own {sig,}setjmp, which doesn't obfuscate the jmp_buf.  */
+#if defined(__GLIBC__) && !defined(__ia64__)
 #if __GLIBC_PREREQ(2, 4)
 
 /* Starting with glibc-2.4, {sig,}setjmp in GLIBC obfuscates the
@@ -49,8 +50,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.  */
    so we simply defer to glibc longjmp here.  */
 #define _longjmp __nonworking__longjmp
 #define longjmp __nonworking_longjmp
-static void _longjmp (jmp_buf env, int val);
-static void longjmp (jmp_buf env, int val);
+static void _longjmp (jmp_buf env, int val) UNUSED;
+static void longjmp (jmp_buf env, int val) UNUSED;
 #endif
 #endif /* __GLIBC__ */
 
@@ -89,6 +90,9 @@ _longjmp (jmp_buf env, int val)
           || unw_set_reg (&c, UNW_REG_IP,
                           (unw_word_t) (uintptr_t) &_UI_longjmp_cont))
         abort ();
+
+      /* longjmp() must not change the signal mask.  */
+      install_resume_sigmask (&c, NULL);
 
       unw_resume (&c);
 
